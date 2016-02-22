@@ -48,6 +48,8 @@ find_package(Qt5Core)
 find_package(Qt5Widgets)
 set(QT_LIBRARIES Qt5::Core;Qt5::Widgets)
 
+message(STATUS "If Boost detection fails as part of finding PCL, explicitly add a CMake variable for Boost_INCLUDE_DIR pointing to the version of boost being used by PCL (eg. C:/Program Files/PCL 1.6.0/3rdParty/Boost/include for the Windows All-in-one installer). This prevents the Boost version that ships with Workspace for Python support causing issues.")
+
 find_package(PCL 1.3 REQUIRED COMPONENTS common features surface kdtree search filters)
     include_directories(${PCL_INCLUDE_DIRS})
     link_directories(${PCL_LIBRARY_DIRS})
@@ -62,10 +64,25 @@ if ((NOT EXISTS "${LIBLAS_SOURCE}/include/liblas/liblas.hpp") OR
     message("Unable to locate either libLAS or LASzip source code. "
             "Please set LIBLAS_SOURCE and LASZIP_SOURCE cache variables to enable this support")
 	add_definitions(-DNO_LIBLAS)
+    set(LIBLAS_LIBRARY "")
 else()
+    set(USE_LIBLAS TRUE)
     set(EXTERNAL_CMAKE_GENERATOR "Unix Makefiles")
     if (WIN32)
         set(EXTERNAL_CMAKE_GENERATOR "NMake Makefiles")
+    endif()
+    
+    # The libs/dlls/so/dylibs won't exist until we do first compile and 
+    # ExternalProject_Add makes it - hence can't use find_file/find_library.
+    
+    # Todo: fix this somehow or at least setup platform specific targets
+    if (WIN32)
+        set(LIBLAS_LIBRARY     ${CMAKE_BINARY_DIR}-libLAS/bin/RelWithDebInfo/liblas.lib)
+        set(LIBLAS_DYNAMIC_LIB ${CMAKE_BINARY_DIR}-libLAS/bin/RelWithDebInfo/liblas.dll)
+        set(LASZIP_LIBRARY     ${CMAKE_BINARY_DIR}-LASzip/bin/laszip.lib)    
+        set(LASZIP_DYNAMIC_LIB ${CMAKE_BINARY_DIR}-LASzip/bin/laszip.dll)
+    else()
+        message("Need to setup libLAS/LASzip target names for this platform")
     endif()
     
     ExternalProject_Add(
@@ -75,19 +92,9 @@ else()
         CMAKE_CACHE_ARGS -DLASZIP_BUILDOSGEO4W:BOOL=FALSE -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo
         BINARY_DIR "${CMAKE_BINARY_DIR}-LASzip"
         INSTALL_COMMAND "")
-        
+                
     include_directories(${LASZIP_SOURCE}/include)
-    
-    find_file(
-        LASZIP_DYNAMIC_LIB
-        NAMES laszip.dll laszip.so     
-        HINTS "${CMAKE_BINARY_DIR}-LASzip/bin")
-
-    find_library(
-        LASZIP_LIBRARY 
-        NAMES laszip
-        HINTS "${CMAKE_BINARY_DIR}-LASzip/bin")
-        
+                
     ExternalProject_Add(
         libLAS
         DEPENDS LASzip
@@ -104,16 +111,7 @@ else()
         INSTALL_COMMAND "")
         
     include_directories(${LIBLAS_SOURCE}/include)
-    
-    find_library(
-        LIBLAS_LIBRARY 
-        NAMES liblas
-        HINTS "${CMAKE_BINARY_DIR}-libLAS/bin" "${CMAKE_BINARY_DIR}-libLAS/bin/RelWithDebInfo")
         
-    find_file(
-        LIBLAS_DYNAMIC_LIB
-        NAMES liblas.dll liblas.so     
-        HINTS "${CMAKE_BINARY_DIR}-libLAS/bin" "${CMAKE_BINARY_DIR}-libLAS/bin/RelWithDebInfo")    
 endif()
 
 # Build SMOOTH SIGNED DISTANCE SURFACE RECONSTRUCTION SOFTWARE from the ssd directory
@@ -134,16 +132,9 @@ qtx_wrap_ui(UIC_SOURCES ${UI_SOURCES})
 qtx_add_resources(RESOURCES resources/pointcloud_resources.qrc)
 
 add_definitions(-DPOINTCLOUD_PLUGIN_VERSION=${POINTCLOUD_PLUGIN_VERSION})
-
-if ((NOT EXISTS "${LIBLAS_SOURCE}/include/liblas/liblas.hpp") OR 
-    (NOT EXISTS "${LASZIP_SOURCE}/include/laszip/laszip.hpp"))
-	add_library(pointcloudplugin ${SOURCES} ${HEADERS} ${MOC_SOURCES} ${UIC_SOURCES} ${RESOURCES})
-	target_link_libraries(pointcloudplugin dataanalysisplugin meshplugin workspace dgp octree ssd ${PCL_LIBRARIES} ${QT_LIBRARIES})
-else()
-	add_library(pointcloudplugin ${SOURCES} ${HEADERS} ${LIDAR_SOURCES} ${LIDAR_HEADERS} ${MOC_SOURCES} ${UIC_SOURCES} ${RESOURCES})
-	target_link_libraries(pointcloudplugin dataanalysisplugin meshplugin workspace dgp octree ssd ${PCL_LIBRARIES} ${LIBLAS_LIBRARY} ${QT_LIBRARIES})
-endif()
-
+add_library(pointcloudplugin ${SOURCES} ${HEADERS} ${MOC_SOURCES} ${UIC_SOURCES} ${RESOURCES})
+message(STATUS ${LASZIP_LIBRARY})
+target_link_libraries(pointcloudplugin dataanalysisplugin meshplugin workspace dgp octree ssd ${LIBLAS_LIBRARY} ${PCL_LIBRARIES} ${QT_LIBRARIES})
 
 set_target_properties(pointcloudplugin PROPERTIES
     DEFINE_SYMBOL CSIRO_POINTCLOUD_EXPORT
